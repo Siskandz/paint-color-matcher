@@ -4,11 +4,12 @@ import numpy as np
 from PIL import Image
 from skimage import color as skcolor
 import re
+from sklearn.metrics import silhouette_score  # Tambahan untuk evaluasi clustering
 
 st.set_page_config(page_title="Paint Color Matcher", page_icon="🎨", layout="centered")
 
-st.markdown('''<style>
-  html, body, [class*="css"] { font-family: 'Segoe UI', sans-serif; }
+st.markdown(\'\'\'<style>
+  html, body, [class*="css"] { font-family: \'Segoe UI\', sans-serif; }
   .header-banner {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     border-radius: 16px; padding: 24px 20px 20px;
@@ -36,13 +37,13 @@ st.markdown('''<style>
   .rank-badge { font-size:0.7rem; background:#fef3c7; color:#92400e; border-radius:20px; padding:1px 8px; font-weight:700; margin-left:8px; }
   [data-testid="stMetricValue"] { font-size: 0.75rem !important; }
   #MainMenu, footer { visibility:hidden; }
-</style>''', unsafe_allow_html=True)
+</style>\'\'\', unsafe_allow_html=True)
 
 @st.cache_data
 def load_colors():
     df = pd.read_excel("kode_warna_avian.xlsx")
     def parse_rgb(s):
-        nums = re.findall(r"\d+", str(s))
+        nums = re.findall(r"\\d+", str(s))
         return tuple(int(x) for x in nums[:3]) if len(nums) >= 3 else None
     df["RGB"] = df["Estimasi RGB"].apply(parse_rgb)
     df = df.dropna(subset=["RGB"])
@@ -82,9 +83,15 @@ def get_dominant_color(img, n_clusters=4):
         ])
         if np.allclose(centers, new_centers, atol=0.5): break
         centers = new_centers
+    
+    # Hitung Silhouette Score dengan sampling 1000 pixel agar ringan
+    sample_size = min(len(pixels), 1000)
+    idx_sample = np.random.choice(len(pixels), sample_size, replace=False)
+    score = silhouette_score(pixels[idx_sample], labels[idx_sample])
+    
     dominant_lab = centers[np.argmax(np.bincount(labels, minlength=n_clusters))]
     rgb = skcolor.lab2rgb(dominant_lab.reshape(1, 1, 3)).reshape(3)
-    return tuple(int(np.clip(v * 255, 0, 255)) for v in rgb)
+    return tuple(int(np.clip(v * 255, 0, 255)) for v in rgb), score
 
 def rgb_to_hex(r, g, b): return f"#{r:02X}{g:02X}{b:02X}"
 
@@ -95,26 +102,26 @@ def color_card_html(result, rank=None):
     r, g, b = result["rgb"]
     de = result["delta_e"]
     sim = delta_e_to_sim(de)
-    badge = '<span class="rank-badge">⭐ Terbaik</span>' if rank == 1 else ''
-    return f'''
-    <div class="color-card {'rank-1' if rank==1 else ''}">
-      <div class="color-swatch" style="background:{result['hex']};"></div>
+    badge = \'<span class="rank-badge">⭐ Terbaik</span>\' if rank == 1 else \'\'
+    return f\'\'\'
+    <div class="color-card {\'rank-1\' if rank==1 else \'\'}">
+      <div class="color-swatch" style="background:{result[\'hex\']};"></div>
       <div class="color-info">
-        <h3>{result['nama']} {badge}</h3>
-        <p>Kode: <b>{result['kode']}</b> &nbsp;|&nbsp; Hex: <b>{result['hex']}</b></p>
+        <h3>{result[\'nama\']} {badge}</h3>
+        <p>Kode: <b>{result[\'kode\']}</b> &nbsp;|&nbsp; Hex: <b>{result[\'hex\']}</b></p>
         <p>RGB: ({r}, {g}, {b})</p>
         <span class="badge">ΔE = {de:.2f} &nbsp;|&nbsp; Kemiripan {sim:.1f}%</span>
       </div>
-    </div>'''
+    </div>\'\'\'
 
-st.markdown('''<div class="header-banner"><h1>🎨 Paint Color Matcher</h1><p>Upload foto warna → temukan warna yang paling cocok</p></div>''', unsafe_allow_html=True)
+st.markdown(\'\'\'<div class="header-banner"><h1>🎨 Paint Color Matcher</h1><p>Upload foto warna → temukan warna yang paling cocok</p></div>\'\'\', unsafe_allow_html=True)
 c1,c2,c3 = st.columns(3)
 c1.metric("Total Warna", f"{len(df_colors):,}")
 c2.metric("Metode", "Delta E CIEDE2000")
 c3.metric("Brand", "Avian Brands")
 st.divider()
 
-st.markdown('<div class="section-title">📸 Input Foto</div>', unsafe_allow_html=True)
+st.markdown(\'<div class="section-title">📸 Input Foto</div>\', unsafe_allow_html=True)
 st.caption("Upload dari galeri atau foto langsung lewat kamera.")
 
 tab1, tab2 = st.tabs(["📁 Upload dari Galeri", "📷 Ambil Foto"])
@@ -143,21 +150,17 @@ if img:
     top_n = st.select_slider("Tampilkan berapa warna terdekat?", options=[3,5,8,10], value=5)
     if st.button("🔍 Analisis Warna", type="primary", use_container_width=True):
         with st.spinner("Menganalisis warna..."):
-            dom = get_dominant_color(img_crop)
+            dom, s_score = get_dominant_color(img_crop)
             r, g, b = dom
             results = find_closest(dom, top_n=top_n)
-        st.markdown('<div class="section-title">🎯 Warna Dominan Terdeteksi</div>', unsafe_allow_html=True)
-        st.markdown(f'''<div class="dom-color-row"><div class="dom-swatch" style="background:{rgb_to_hex(r,g,b)};"></div><div class="dom-text"><b>RGB ({r}, {g}, {b})</b><br>{rgb_to_hex(r,g,b)}</div></div>''', unsafe_allow_html=True)
-        st.markdown(f'<div class="section-title">🏆 {top_n} Warna Avian Paling Cocok</div>', unsafe_allow_html=True)
+        st.markdown(\'<div class="section-title">🎯 Warna Dominan Terdeteksi</div>\', unsafe_allow_html=True)
+        st.markdown(f\'\'\'<div class="dom-color-row"><div class="dom-swatch" style="background:{rgb_to_hex(r,g,b)};"></div><div class="dom-text"><b>RGB ({r}, {g}, {b})</b><br>{rgb_to_hex(r,g,b)}<br><small>K-Means Silhouette Score: <b>{s_score:.3f}</b></small></div></div>\'\'\', unsafe_allow_html=True)
+        st.markdown(f\'<div class="section-title">🏆 {top_n} Warna Avian Paling Cocok</div>\', unsafe_allow_html=True)
         for i, res in enumerate(results, 1):
             st.markdown(color_card_html(res, rank=i), unsafe_allow_html=True)
-        df_out = pd.DataFrame([{"Rank":i+1,"Kode":r["kode"],"Nama Warna":r["nama"],"Hex":r["hex"],"RGB":str(r["rgb"]),"Delta E":f"{r['delta_e']:.2f}","Kemiripan (%)":f"{delta_e_to_sim(r['delta_e']):.1f}"} for i,r in enumerate(results)])
+        df_out = pd.DataFrame([{"Rank":i+1,"Kode":r["kode"],"Nama Warna":r["nama"],"Hex":r["hex"],"RGB":str(r["rgb"]),"Delta E":f"{r[\'delta_e\']:.2f}","Kemiripan (%)":f"{delta_e_to_sim(r[\'delta_e\']):.1f}"} for i,r in enumerate(results)])
         st.download_button("⬇️ Download Hasil (.csv)", df_out.to_csv(index=False).encode(), "hasil_warna.csv", "text/csv", use_container_width=True)
 else:
-    st.markdown('''<div style="text-align:center;color:#9ca3af;padding:40px 20px;"><div style="font-size:3rem;">📷</div><p>Upload foto atau ambil gambar untuk memulai deteksi warna</p></div>''', unsafe_allow_html=True)
-    with st.expander("ℹ️ Cara Penggunaan"):
-        st.markdown("1. Pilih tab **Upload dari Galeri** atau **Ambil Foto**\n2. *(Opsional)* Gunakan **crop** untuk fokus area\n3. Pilih jumlah hasil\n4. Klik **Analisis Warna**!")
-    with st.expander("🔬 Cara Kerja Algoritma"):
-        st.markdown("- **K-Means Clustering** di ruang LAB untuk ekstraksi warna dominan\n- **Konversi LAB color space** untuk representasi persepsi manusia\n- **Delta E CIEDE2000** untuk pencocokan warna paling akurat secara persepsi")
+    st.markdown(\'\'\'<div style="text-align:center;color:#9ca3af;padding:40px 20px;"><div style="font-size:3rem;">📷</div><p>Upload foto atau ambil gambar untuk memulai deteksi warna</p></div>\'\'\', unsafe_allow_html=True)
 st.divider()
 st.caption("🎨 Avian Color Matcher · Tugas Besar Pengolahan Citra · Data: Avian Brands")
